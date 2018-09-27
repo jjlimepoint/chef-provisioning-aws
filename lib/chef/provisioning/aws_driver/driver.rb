@@ -102,14 +102,24 @@ class Chef
           Driver.new(driver_url, config)
         end
 
-        def initialize(driver_url, config)
-          super
+        def update_credentials()
+          driver_url = @driver_url
+          config = @config
 
           _, profile_name, region = driver_url.split(":")
           profile_name = nil if profile_name && profile_name.empty?
           region = nil if region && region.empty?
 
+
           credentials = profile_name ? aws_credentials[profile_name] : aws_credentials.default
+
+          if ENV['AWS_DEFAULT_ROLE']
+            credentials = Aws::AssumeRoleCredentials.new(
+              role_arn: ENV['AWS_DEFAULT_ROLE']
+              role_session_name: "chef-provisioning-aws-session"
+            )
+          end
+
           @aws_config = Aws.config.update(
             access_key_id:     credentials[:aws_access_key_id],
             secret_access_key: credentials[:aws_secret_access_key],
@@ -122,6 +132,9 @@ class Chef
           # TODO: document how users could add something to the Aws.config themselves if they want to
           # Right now we are supporting both V1 and V2, so we create 2 config sets
           credentials2 = Credentials2.new(profile_name: profile_name)
+          if ENV['AWS_DEFAULT_ROLE']
+            credentials2 = credentials
+          end
           Chef::Config.chef_provisioning ||= {}
           @aws_config_2 = {
             credentials: credentials2.get_credentials,
@@ -132,6 +145,14 @@ class Chef
             logger: Chef::Log.logger,
             retry_limit: Chef::Config.chef_provisioning[:aws_retry_limit] || 5
           }
+        end
+
+        def initialize(driver_url, config)
+          super
+
+          @driver_url = driver_url
+          @config = config
+          update_credentials
 
           driver = self
           Chef::Resource::Machine.send(:define_method, :aws_object) do
